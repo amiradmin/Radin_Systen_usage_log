@@ -16,6 +16,7 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 TO_EMAIL = os.getenv("TO_EMAIL")
 
 TRACKER_FILE = "usage_tracker.json"
+COUNTER_FILE = "log_counter.txt"
 
 def load_usage_data():
     if not Path(TRACKER_FILE).exists():
@@ -82,11 +83,24 @@ Current Time   : {persian_now}
 Uptime Duration: {days}d {hours}h {minutes}m {seconds}s
 """
 
+def get_next_log_index():
+    if not Path(COUNTER_FILE).exists():
+        with open(COUNTER_FILE, "w") as f:
+            f.write("1")
+        return 1
+    with open(COUNTER_FILE, "r+") as f:
+        index = int(f.read().strip())
+        f.seek(0)
+        f.write(str(index + 1))
+        f.truncate()
+        return index
+
 def send_email(subject, body):
+    recipients = [email.strip() for email in TO_EMAIL.split(",") if email.strip()]
     msg = MIMEText(body)
     msg["Subject"] = subject
     msg["From"] = EMAIL_ADDRESS
-    msg["To"] = TO_EMAIL
+    msg["To"] = ", ".join(recipients)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
@@ -100,6 +114,10 @@ if __name__ == "__main__":
     email_body = f"{uptime_log}\nDaily Usage Summary:\n{usage_summary}"
 
     print(email_body)
+
+    log_index = get_next_log_index()
+    subject = f"Radin Daily Uptime Log #{log_index}"
+
     print("Sending email with uptime log and usage summary...")
-    send_email("Radin Daily Uptime Log", email_body)
+    send_email(subject, email_body)
     print("Email sent!")
