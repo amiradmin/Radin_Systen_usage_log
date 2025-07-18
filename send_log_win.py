@@ -7,6 +7,7 @@ import os
 import json
 from pathlib import Path
 from tabulate import tabulate
+import jdatetime  # For Persian (Jalali) dates
 
 # Load credentials
 load_dotenv(".env")
@@ -20,10 +21,7 @@ def load_usage_data():
     if not Path(TRACKER_FILE).exists():
         return {}
     with open(TRACKER_FILE, "r") as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            return {}  # Return empty if file is corrupted or not JSON
+        return json.load(f)
 
 def save_usage_data(data):
     with open(TRACKER_FILE, "w") as f:
@@ -31,7 +29,7 @@ def save_usage_data(data):
 
 def update_usage_data():
     now = datetime.now().astimezone()
-    today = now.strftime('%Y-%m-%d')
+    today = jdatetime.datetime.fromgregorian(datetime=now).strftime('%Y-%m-%d')
     data = load_usage_data()
 
     if today not in data:
@@ -39,13 +37,10 @@ def update_usage_data():
     else:
         last_check_str = data[today].get("last_check")
         if last_check_str:
-            try:
-                last_check = datetime.fromisoformat(last_check_str)
-                delta = now - last_check
-                if 0 < delta.total_seconds() < 3600:
-                    data[today]["used_seconds"] += int(delta.total_seconds())
-            except ValueError:
-                pass  # if datetime parsing fails, skip
+            last_check = datetime.fromisoformat(last_check_str)
+            delta = now - last_check
+            if 0 < delta.total_seconds() < 3600:  # Ignore long gaps
+                data[today]["used_seconds"] += int(delta.total_seconds())
 
         data[today]["last_check"] = now.isoformat()
 
@@ -58,13 +53,13 @@ def format_duration(seconds):
     s = seconds % 60
     return f"{h}h {m}m {s}s"
 
-def build_usage_table(data):
+def get_usage_table_text(data):
     rows = []
     for date, values in sorted(data.items()):
         if isinstance(values, dict):
             used = values.get("used_seconds", 0)
             rows.append([date, format_duration(used)])
-    return tabulate(rows, headers=["Date", "Usage Time"], tablefmt="grid")
+    return tabulate(rows, headers=["Date (Persian)", "Usage Time"], tablefmt="grid", stralign="center")
 
 def get_uptime_log():
     boot_time = datetime.fromtimestamp(psutil.boot_time()).astimezone()
@@ -75,11 +70,15 @@ def get_uptime_log():
     hours, remainder = divmod(uptime.seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
 
+    # Convert to Persian dates
+    persian_now = jdatetime.datetime.fromgregorian(datetime=now).strftime('%Y-%m-%d %H:%M:%S')
+    persian_boot = jdatetime.datetime.fromgregorian(datetime=boot_time).strftime('%Y-%m-%d %H:%M:%S')
+
     return f"""
-Radin's Uptime Report - {now.strftime('%Y-%m-%d')}
+Radin's Uptime Report - {persian_now.split()[0]}
 --------------------------------------------
-Boot Time      : {boot_time.strftime('%Y-%m-%d %H:%M:%S')}
-Current Time   : {now.strftime('%Y-%m-%d %H:%M:%S')}
+Boot Time      : {persian_boot}
+Current Time   : {persian_now}
 Uptime Duration: {days}d {hours}h {minutes}m {seconds}s
 """
 
@@ -95,13 +94,12 @@ def send_email(subject, body):
 
 if __name__ == "__main__":
     data = update_usage_data()
-    log = get_uptime_log()
-    usage_table = build_usage_table(data)
+    uptime_log = get_uptime_log()
+    usage_summary = get_usage_table_text(data)
 
-    full_log = log + "\nDaily Usage Summary:\n" + usage_table
+    email_body = f"{uptime_log}\nDaily Usage Summary:\n{usage_summary}"
 
-    print(full_log)
-
-    print("Sending email with uptime log...")
-    send_email("Radin Daily Uptime Log", full_log)
+    print(email_body)
+    print("Sending email with uptime log and usage summary...")
+    send_email("Radin Daily Uptime Log", email_body)
     print("Email sent!")
